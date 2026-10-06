@@ -27,7 +27,12 @@ def register_parse_pipelines(register_fn) -> None:  # type: ignore[no-untyped-de
     _bv_base = {"effort": "low", "stage": "full", "timeout": 240, "zoom_effort": "high", "transport": "openai"}
     for _bv_name, _bv_cfg in {
         "byteverity_parse": {**_bv_base, "model": "gpt-6-luna", "escalate_model": "gpt-6-luna"},
-        "byteverity_parse_hybrid": {**_bv_base, "model": "gpt-6-luna", "escalate_model": "gpt-6-sol", "chart_repair": True},
+        "byteverity_parse_hybrid": {
+            **_bv_base,
+            "model": "gpt-6-luna",
+            "escalate_model": "gpt-6-sol",
+            "chart_repair": True,
+        },
     }.items():
         register_fn(
             PipelineSpec(

@@ -34,7 +34,6 @@ from parse_bench.inference.providers.parse._layout_utils import (
     items_to_markdown,
     parse_layout_blocks,
 )
-from . import floor
 from parse_bench.inference.providers.registry import register_provider
 from parse_bench.schemas.parse_output import PageIR, ParseLayoutPageIR, ParseOutput
 from parse_bench.schemas.pipeline import PipelineSpec
@@ -44,6 +43,8 @@ from parse_bench.schemas.pipeline_io import (
     RawInferenceResult,
 )
 from parse_bench.schemas.product import ProductType
+
+from . import floor
 
 EXTRA_RULES = (
     "\n\nAdditional rules (important):\n"
@@ -84,13 +85,17 @@ def _usage_log() -> list:
 def _usage_summary(num_pages: int) -> dict[str, Any]:
     calls = list(_usage_log())
     total = sum(c.get("cost_usd") or 0.0 for c in calls)
-    return {"usage_calls": calls, "input_tokens": sum(c.get("input_tokens", 0) for c in calls),
-            "output_tokens": sum(c.get("output_tokens", 0) for c in calls),
-            "thinking_tokens": sum(c.get("reasoning_tokens", 0) for c in calls),
-            "cost_usd": total, "cost_per_page_usd": total / num_pages if num_pages else 0.0}
+    return {
+        "usage_calls": calls,
+        "input_tokens": sum(c.get("input_tokens", 0) for c in calls),
+        "output_tokens": sum(c.get("output_tokens", 0) for c in calls),
+        "thinking_tokens": sum(c.get("reasoning_tokens", 0) for c in calls),
+        "cost_usd": total,
+        "cost_per_page_usd": total / num_pages if num_pages else 0.0,
+    }
+
+
 _ORACLE_CLIENT: Any = None
-
-
 
 
 class _TableDecide:
@@ -98,6 +103,7 @@ class _TableDecide:
 
     def evaluate(self, oracle: str, facts: dict[str, Any]) -> dict[str, Any]:
         from .tables import table
+
         return table(os.path.basename(os.path.normpath(oracle))).evaluate(facts)
 
 
@@ -122,7 +128,7 @@ class ByteVerityProvider(Provider):
         self._stage = self.base_config.get("stage", "full")
         self._transport = self.base_config.get("transport", os.environ.get("BYTEVERITY_TRANSPORT", "codex"))
         self._codex = None
-        if self._transport == "codex":   # the Codex CLI is needed only for the codex transport
+        if self._transport == "codex":  # the Codex CLI is needed only for the codex transport
             self._codex = shutil.which("codex") or os.path.expanduser("~/.local/bin/codex")
             if not os.path.exists(self._codex):
                 raise ProviderConfigError("transport=codex needs the codex CLI on PATH (or use transport=openai)")
@@ -140,11 +146,21 @@ class ByteVerityProvider(Provider):
         dets = None
         if os.environ.get("SX_LAYOUT_LIVE", "1") == "1":
             from .layout import detect_page
+
             dets = detect_page(page)
-        if self._model == "none":   # byteverity_parse_novlm: no proposer at all
+        if self._model == "none":  # byteverity_parse_novlm: no proposer at all
             route = "fallback_textlayer" if tl != "none" else "give_up_empty"
-            return {"page_index": i, "raw_content": "", "items": [], "width": w, "height": h, "route": route,
-                    "trail": [{"model": "none", "route": route}], "text_layer": tl, "layout_dets": dets}
+            return {
+                "page_index": i,
+                "raw_content": "",
+                "items": [],
+                "width": w,
+                "height": h,
+                "route": route,
+                "trail": [{"model": "none", "route": route}],
+                "text_layer": tl,
+                "layout_dets": dets,
+            }
         prompt = CODEX_PREAMBLE + SYSTEM_PROMPT_LAYOUT + EXTRA_RULES + "\n\n" + USER_PROMPT_LAYOUT
         trail = []
         escalated = False
@@ -161,14 +177,21 @@ class ByteVerityProvider(Provider):
             facts = {"vlm_status": status, "text_layer": tl, "recall": rc, "escalated": escalated}
             d = self._route(facts)
             route = (d.get("decision") or {}).get("route", "HOLD") if d.get("status") == "DECIDED" else "HOLD"
-            trail.append({"model": model, "facts": facts, "route": route,
-                          "result_digest": d.get("result_digest")})
+            trail.append({"model": model, "facts": facts, "route": route, "result_digest": d.get("result_digest")})
             if route == "escalate" and not escalated:
                 escalated, model = True, self._escalate_model
                 continue
             break
-        page_out = {"page_index": i, "raw_content": raw, "items": items, "width": w, "height": h,
-                    "route": route, "trail": trail, "text_layer": tl}
+        page_out = {
+            "page_index": i,
+            "raw_content": raw,
+            "items": items,
+            "width": w,
+            "height": h,
+            "route": route,
+            "trail": trail,
+            "text_layer": tl,
+        }
         if tl != "full" and items and os.environ.get("SX_EMPHASIS_LIVE", "1") == "1":
             page_out["emphasis"] = self._emphasis_query(img, items)
         if items and os.environ.get("SX_TABLE_ZOOM_LIVE", "1") == "1":
@@ -181,7 +204,8 @@ class ByteVerityProvider(Provider):
     def _chart_repair(self, page: Any, img: str, pd: dict[str, Any]) -> None:
         """Residual chart repair (hybrid): re-ask the escalation model when printed chart text is unexplained;
         the sealed chart_repair_gate accepts only a strictly better residual band."""
-        from .chart_repair import band, residual, repair_note
+        from .chart_repair import band, repair_note, residual
+
         r0, miss = residual(page, pd["items"])
         if band(r0) not in ("high", "no_table"):
             return
@@ -200,16 +224,24 @@ class ByteVerityProvider(Provider):
             pd["raw_content"], pd["items"] = out, items
 
     def _table_zoom(self, page: Any, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Zoom pass (proposer model, effort high): re-ask each of the proposer's own tables on a high-dpi crop. O13 decides."""
+        """Zoom pass (proposer model, effort high).
+
+        Re-asks each of the proposer's own tables on a high-dpi crop; O13 decides admission.
+        """
         import pymupdf
+
         from .prompts_table import PROMPT as _TPROMPT
+
         out = []
         W, H = page.rect.width, page.rect.height
         for k, it in enumerate(items):
             bb = it.get("bbox")
             if (it.get("label") or "").lower() != "table" or not (isinstance(bb, list) and len(bb) == 4):
                 continue
-            clip = pymupdf.Rect(bb[0] / 1000 * W - 15, bb[1] / 1000 * H - 15, bb[2] / 1000 * W + 15, bb[3] / 1000 * H + 15) & page.rect
+            clip = (
+                pymupdf.Rect(bb[0] / 1000 * W - 15, bb[1] / 1000 * H - 15, bb[2] / 1000 * W + 15, bb[3] / 1000 * H + 15)
+                & page.rect
+            )
             if clip.is_empty or clip.width < 20 or clip.height < 10:
                 continue
             with tempfile.TemporaryDirectory(prefix="sx_tz_") as td:
@@ -217,7 +249,9 @@ class ByteVerityProvider(Provider):
                 z = max(2.0, min(4.0, 1600 / max(clip.width, 1)))
                 page.get_pixmap(matrix=pymupdf.Matrix(z, z), clip=clip).save(img)
                 try:
-                    html = self._codex_call(img, _TPROMPT, model=self._model, effort=self.base_config.get("zoom_effort", "high"))
+                    html = self._codex_call(
+                        img, _TPROMPT, model=self._model, effort=self.base_config.get("zoom_effort", "high")
+                    )
                 except ProviderTransientError:
                     continue
             m = re.search(r"<table[\s\S]*</table>", html, re.I)
@@ -228,12 +262,16 @@ class ByteVerityProvider(Provider):
     def _emphasis_query(self, img: str, items: list[dict[str, Any]]) -> dict[str, Any]:
         """Residual query (proposer model only): which of the proposer's own lines are headings / bold. O11 decides."""
         import json as _json
+
         from .prompts_emphasis import PROMPT, lines_of
+
         lines = lines_of(_sx_markdown([dict(it, text=_prose_breaks(it.get("text", ""))) for it in items]))
         if not lines:
             return {"headings": [], "bold": []}
         try:
-            out = self._codex_call(img, PROMPT + "\n".join(f"{k+1}: {l}" for k, l in enumerate(lines)), model=self._model)
+            out = self._codex_call(
+                img, PROMPT + "\n".join(f"{k + 1}: {li}" for k, li in enumerate(lines)), model=self._model
+            )
         except ProviderTransientError as e:
             return {"error": str(e)[:200]}
         m = re.search(r"\{[\s\S]*\}", out)
@@ -241,9 +279,16 @@ class ByteVerityProvider(Provider):
             js = _json.loads(m.group(0)) if m else {}
         except Exception:
             return {"error": "unparseable"}
-        heads = [{"text": lines[h["line"] - 1], "level": int(h.get("level", 2))} for h in js.get("headings", [])
-                 if isinstance(h, dict) and isinstance(h.get("line"), int) and 1 <= h["line"] <= len(lines)]
-        bolds = [{"text": b["text"]} for b in js.get("bold", []) if isinstance(b, dict) and isinstance(b.get("text"), str) and b["text"].strip()]
+        heads = [
+            {"text": lines[h["line"] - 1], "level": int(h.get("level", 2))}
+            for h in js.get("headings", [])
+            if isinstance(h, dict) and isinstance(h.get("line"), int) and 1 <= h["line"] <= len(lines)
+        ]
+        bolds = [
+            {"text": b["text"]}
+            for b in js.get("bold", [])
+            if isinstance(b, dict) and isinstance(b.get("text"), str) and b["text"].strip()
+        ]
         return {"headings": heads, "bold": bolds}
 
     # -- VLM proposer ---------------------------------------------------------
@@ -253,10 +298,13 @@ class ByteVerityProvider(Provider):
         if self._transport == "openai":
             if self._api is None:
                 from .transport import OpenAITransport
-                self._api = OpenAITransport(max_tokens=int(self.base_config.get("max_tokens", 32768)),
-                                            base_url=self.base_config.get("base_url"),
-                                            api_key_env=self.base_config.get("api_key_env", "OPENAI_API_KEY"),
-                                            effort_style=self.base_config.get("effort_style", "openai"))
+
+                self._api = OpenAITransport(
+                    max_tokens=int(self.base_config.get("max_tokens", 32768)),
+                    base_url=self.base_config.get("base_url"),
+                    api_key_env=self.base_config.get("api_key_env", "OPENAI_API_KEY"),
+                    effort_style=self.base_config.get("effort_style", "openai"),
+                )
             last: Exception | None = None
             for attempt in range(self._retries + 1):
                 try:
@@ -273,14 +321,28 @@ class ByteVerityProvider(Provider):
             with tempfile.TemporaryDirectory(prefix="sx_codex_") as wd:
                 out = os.path.join(wd, "out.md")
                 cmd = [
-                    self._codex, "exec", "--skip-git-repo-check", "--ephemeral",
-                    "-s", "read-only", "-C", wd, "-m", model,
-                    "-c", f"model_reasoning_effort={effort}",
-                    "-i", image_path, "-o", out, prompt,
+                    self._codex,
+                    "exec",
+                    "--skip-git-repo-check",
+                    "--ephemeral",
+                    "-s",
+                    "read-only",
+                    "-C",
+                    wd,
+                    "-m",
+                    model,
+                    "-c",
+                    f"model_reasoning_effort={effort}",
+                    "-i",
+                    image_path,
+                    "-o",
+                    out,
+                    prompt,
                 ]
                 try:
-                    p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
-                                       text=True, timeout=self._timeout)
+                    p = subprocess.run(
+                        cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=self._timeout
+                    )
                 except subprocess.TimeoutExpired:
                     last_err = "timeout"
                     continue
@@ -310,17 +372,33 @@ class ByteVerityProvider(Provider):
                 if self._stage == "baseline":
                     prompt = CODEX_PREAMBLE + SYSTEM_PROMPT_LAYOUT + "\n\n" + USER_PROMPT_LAYOUT
                     raw = self._codex_call(img, prompt)
-                    pages.append({"page_index": i, "raw_content": raw, "items": parse_layout_blocks(raw),
-                                  "width": pix.width, "height": pix.height})
+                    pages.append(
+                        {
+                            "page_index": i,
+                            "raw_content": raw,
+                            "items": parse_layout_blocks(raw),
+                            "width": pix.width,
+                            "height": pix.height,
+                        }
+                    )
                     continue
                 pages.append(self._full_page(page, i, img, pix.width, pix.height))
         completed_at = datetime.now()
         return RawInferenceResult(
-            request=request, pipeline=pipeline, pipeline_name=pipeline.pipeline_name,
+            request=request,
+            pipeline=pipeline,
+            pipeline_name=pipeline.pipeline_name,
             product_type=request.product_type,
-            raw_output={"pages": pages, "num_pages": len(pages), "model": self._model,
-                        "config": dict(self.base_config), "transport": self._transport, **_usage_summary(len(pages))},
-            started_at=started_at, completed_at=completed_at,
+            raw_output={
+                "pages": pages,
+                "num_pages": len(pages),
+                "model": self._model,
+                "config": dict(self.base_config),
+                "transport": self._transport,
+                **_usage_summary(len(pages)),
+            },
+            started_at=started_at,
+            completed_at=completed_at,
             latency_in_ms=int((completed_at - started_at).total_seconds() * 1000),
         )
 
@@ -333,6 +411,7 @@ class ByteVerityProvider(Provider):
         if stage != "baseline":
             try:
                 import pymupdf
+
                 doc = pymupdf.open(str(raw_result.request.source_file_path))
             except Exception:
                 doc = None
@@ -347,6 +426,7 @@ class ByteVerityProvider(Provider):
                 pd["proposer"] = "none" if (raw_result.raw_output.get("model") == "none") else "vlm"
                 pd["_example_id"] = raw_result.request.example_id
                 from .rules import rules as _rules
+
                 R = _rules()
                 if R is not None and os.environ.get("SX_O0", "1") == "1":
                     vf = floor.text_layer_validity_facts(doc[idx])
@@ -354,7 +434,11 @@ class ByteVerityProvider(Provider):
                     pd["validity_facts"] = vf
                 items, st = apply_floor(doc[idx], pd, items)
                 st["authority"] = pd.get("authority")
-                geo_ok = (pd["authority"] in ("full_authority", "geometry_only")) if "authority" in pd else pd.get("text_layer") == "full"
+                geo_ok = (
+                    (pd["authority"] in ("full_authority", "geometry_only"))
+                    if "authority" in pd
+                    else pd.get("text_layer") == "full"
+                )
                 if not geo_ok and R is not None and pd.get("authority") and items:
                     mask, inkband = floor.page_ink(doc[idx])
                     if R.decide("pixel_floor", authority=pd["authority"], ink=inkband) == "use":
@@ -363,7 +447,11 @@ class ByteVerityProvider(Provider):
                 if _SX_TOGGLES["segground"] and geo_ok:
                     segs = floor.pdf_segments(doc[idx])
                     if segs:
-                        base = floor.reconcile_pictures(items, floor.pdf_images(doc[idx])) if _SX_TOGGLES["images"] else items
+                        base = (
+                            floor.reconcile_pictures(items, floor.pdf_images(doc[idx]))
+                            if _SX_TOGGLES["images"]
+                            else items
+                        )
                         if _SX_TOGGLES["ink"]:
                             comps = floor.ink_components(doc[idx])
                             if os.environ.get("SX_INKMULTI", "1") == "1":  # admitted by ratchet R7
@@ -380,50 +468,84 @@ class ByteVerityProvider(Provider):
             else:
                 md = _sx_markdown(items) if items else pd.get("raw_content", "")
             le_file = os.environ.get("SX_LAYOUT_EVIDENCE", "")
-            if (pd.get("layout_dets") or (le_file and os.path.exists(le_file))) and doc is not None and idx < len(doc) and pd.get("authority"):
+            if (
+                (pd.get("layout_dets") or (le_file and os.path.exists(le_file)))
+                and doc is not None
+                and idx < len(doc)
+                and pd.get("authority")
+            ):
                 src = str(raw_result.request.source_file_path)
                 key = "docs/" + src.split("/docs/")[-1] if "/docs/" in src else src
                 dets = pd.get("layout_dets") or _load_claims(le_file).get(key, {}).get(str(idx))
                 if dets and R is not None:
                     n_ok = sum(1 for d in dets if d["score"] >= 0.5)
-                    src_ = R.decide("layout_source", detector="none" if n_ok == 0 else "sparse" if n_ok < 3 else "normal",
-                                    authority=pd["authority"])
+                    src_ = R.decide(
+                        "layout_source",
+                        detector="none" if n_ok == 0 else "sparse" if n_ok < 3 else "normal",
+                        authority=pd["authority"],
+                    )
                     if src_ == "use_detector":
                         dg = floor.detector_items(doc[idx], dets, items, pd["authority"])
                         if dg:
                             ground = dg
-            layout_pages.extend(build_layout_pages(ground if ground else items, pd.get("width", 0), pd.get("height", 0),
-                                                   md, page_number=idx + 1, bbox_scale=1000))
+            layout_pages.extend(
+                build_layout_pages(
+                    ground if ground else items,
+                    pd.get("width", 0),
+                    pd.get("height", 0),
+                    md,
+                    page_number=idx + 1,
+                    bbox_scale=1000,
+                )
+            )
             pages.append(PageIR(page_index=idx, markdown=md))
             mds.append(md)
         # O11 residual emphasis: claims recorded at inference (live), else a sidecar for frozen-output replays
         from .rules import rules as _rules
+
         R = _rules()
         claim = (raw_result.raw_output.get("pages") or [{}])[0].get("emphasis")
         claims_file = os.environ.get("SX_EMPHASIS")
         if claim is None and claims_file and os.path.exists(claims_file):
             claim = _load_claims(claims_file).get(raw_result.request.example_id)
-        no_vlm = raw_result.raw_output.get("model") == "none"   # claims come from the proposer: never on the no-VLM arm
+        no_vlm = raw_result.raw_output.get("model") == "none"  # claims come from the proposer: never on the no-VLM arm
         if R is not None and claim and "error" not in claim and mds and not no_vlm:
             mds[0], est = _apply_emphasis(mds[0], claim, R)
-            pages = [PageIR(page_index=p.page_index, markdown=(mds[0] if p.page_index == pages[0].page_index else p.markdown)) for p in pages]
+            pages = [
+                PageIR(
+                    page_index=p.page_index, markdown=(mds[0] if p.page_index == pages[0].page_index else p.markdown)
+                )
+                for p in pages
+            ]
             raw_result.raw_output["emphasis_stats"] = est
         if os.environ.get("SX_BOLDSEAM", "1") == "1":  # admitted by ratchet v2 (F2)
             pages = [PageIR(page_index=p.page_index, markdown=_BOLD_SEAM_RE.sub(r"\1", p.markdown)) for p in pages]
             mds = [_BOLD_SEAM_RE.sub(r"\1", m) for m in mds]
         if floor_stats:
             raw_result.raw_output["floor_stats"] = floor_stats
-        output = ParseOutput(task_type="parse", example_id=raw_result.request.example_id,
-                             pipeline_name=raw_result.pipeline_name, pages=pages,
-                             markdown="\n\n".join(mds), layout_pages=layout_pages)
-        return InferenceResult(request=raw_result.request, pipeline_name=raw_result.pipeline_name,
-                               product_type=raw_result.product_type, raw_output=raw_result.raw_output,
-                               output=output, started_at=raw_result.started_at,
-                               completed_at=raw_result.completed_at,
-                               latency_in_ms=raw_result.latency_in_ms)
+        output = ParseOutput(
+            task_type="parse",
+            example_id=raw_result.request.example_id,
+            pipeline_name=raw_result.pipeline_name,
+            pages=pages,
+            markdown="\n\n".join(mds),
+            layout_pages=layout_pages,
+        )
+        return InferenceResult(
+            request=raw_result.request,
+            pipeline_name=raw_result.pipeline_name,
+            product_type=raw_result.product_type,
+            raw_output=raw_result.raw_output,
+            output=output,
+            started_at=raw_result.started_at,
+            completed_at=raw_result.completed_at,
+            latency_in_ms=raw_result.latency_in_ms,
+        )
 
 
-_SX_TOGGLES = {k: os.environ.get(f"SX_{k.upper()}", "1") == "1" for k in ("snap", "markup", "fallback", "segground", "images")}
+_SX_TOGGLES = {
+    k: os.environ.get(f"SX_{k.upper()}", "1") == "1" for k in ("snap", "markup", "fallback", "segground", "images")
+}
 _SX_TOGGLES["chartsnap"] = os.environ.get("SX_CHARTSNAP", "0") == "1"
 _SX_TOGGLES["ink"] = os.environ.get("SX_INK", "1") == "1"  # admitted by ratchet R7
 _SX_TOGGLES["charttitle"] = os.environ.get("SX_CHARTTITLE", "1") == "1"  # admitted by ratchet R4
@@ -442,6 +564,7 @@ def _bold_chart_titles(text: str) -> tuple[str, int]:
             if not ln:
                 continue
             from .rules import rules as _rules
+
             R = _rules()
             if R is not None:
                 ok = R.decide("chart_title", has_markup=ln.startswith(("**", "#", "<")), long=len(ln) > 200) == "bold"
@@ -462,12 +585,19 @@ def _textlayer_items(page: Any) -> list[dict[str, Any]]:
     for x0, y0, x1, y1, txt, _bn, btype in page.get_text("blocks", sort=True):
         if btype != 0 or not txt.strip():
             continue
-        items.append({"bbox": [x0 / W * 1000, y0 / H * 1000, x1 / W * 1000, y1 / H * 1000],
-                      "label": "Text", "text": " ".join(txt.split())})
+        items.append(
+            {
+                "bbox": [x0 / W * 1000, y0 / H * 1000, x1 / W * 1000, y1 / H * 1000],
+                "label": "Text",
+                "text": " ".join(txt.split()),
+            }
+        )
     return items
 
 
-def apply_floor(page: Any, pd: dict[str, Any], items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def apply_floor(
+    page: Any, pd: dict[str, Any], items: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Execute the sealed oracle's route for one page using PDF-proven facts."""
     route = pd.get("route", "accept_snap")
     st: dict[str, Any] = {"route": route}
@@ -480,7 +610,12 @@ def apply_floor(page: Any, pd: dict[str, Any], items: list[dict[str, Any]]) -> t
         st["snapped"] = n
     if _SX_TOGGLES["chartsnap"] and items and pd.get("text_layer", "none") != "none":
         from . import chart
-        pics = [it for it in items if (it.get("label") or "").lower() in ("picture", "figure") and "<table" in it.get("text", "")]
+
+        pics = [
+            it
+            for it in items
+            if (it.get("label") or "").lower() in ("picture", "figure") and "<table" in it.get("text", "")
+        ]
         if pics:
             axes = chart.calibrate_axes(page)
             cands = chart.candidate_values(page, axes)
@@ -491,6 +626,7 @@ def apply_floor(page: Any, pd: dict[str, Any], items: list[dict[str, Any]]) -> t
                 k += n
             st["chartsnap"] = k
     from .rules import rules as _rules
+
     R = _rules()
     if R is not None and items and pd.get("authority"):
         owned, orphans = floor.word_ownership(page, items)
@@ -500,8 +636,12 @@ def apply_floor(page: Any, pd: dict[str, Any], items: list[dict[str, Any]]) -> t
             if lab.lower() in floor._OWNER_LABELS_SELF:
                 continue
             ptxt = floor.words_to_text(owned.get(k, []))
-            src = R.decide("content_source", authority=pd["authority"], label=floor.label_class(lab),
-                           agreement=floor.agreement_band(it.get("text", ""), ptxt))
+            src = R.decide(
+                "content_source",
+                authority=pd["authority"],
+                label=floor.label_class(lab),
+                agreement=floor.agreement_band(it.get("text", ""), ptxt),
+            )
             if src == "pdf":
                 it["text"] = ptxt
                 n_pdf += 1
@@ -528,7 +668,11 @@ def apply_floor(page: Any, pd: dict[str, Any], items: list[dict[str, Any]]) -> t
                 it["text"], n = _bold_chart_titles(it["text"])
                 k += n
         st["charttitle"] = k
-    style_ok = (pd["authority"] in ("full_authority", "style_only")) if "authority" in pd else pd.get("text_layer", "none") != "none"
+    style_ok = (
+        (pd["authority"] in ("full_authority", "style_only"))
+        if "authority" in pd
+        else pd.get("text_layer", "none") != "none"
+    )
     if _SX_TOGGLES["markup"] and items and style_ok:
         runs = floor.styled_runs(page)
         items, ms = floor.inject_markup(items, runs)
@@ -549,11 +693,17 @@ _DOUBLE_BOLD_RE = re.compile(r"\*\*\*\*(.*?)\*\*\*\*", re.DOTALL)
 
 def _clean_prose_chunk(p: str) -> str:
     import html
+
     p = _BR_RE.sub("\n", p)
     p = _STRONG_RE.sub(lambda m: m.group(2) if m.group(2).startswith("**") else f"**{m.group(2)}**", p)
     p = _EM_RE.sub(lambda m: f"*{m.group(2)}*", p)
     p = _DOUBLE_BOLD_RE.sub(r"**\1**", p)
-    return html.unescape(p) if "&" in p and "<" not in p.replace("<sup>", "").replace("</sup>", "").replace("<sub>", "").replace("</sub>", "") else p
+    return (
+        html.unescape(p)
+        if "&" in p
+        and "<" not in p.replace("<sup>", "").replace("</sup>", "").replace("<sub>", "").replace("</sub>", "")
+        else p
+    )
 
 
 def _prose_breaks(text: str) -> str:
@@ -572,8 +722,9 @@ def _sx_markdown(items: list[dict[str, Any]]) -> str:
             continue
         if lab in ("title", "section-header", "section_header"):
             mark = "#" if lab == "title" else "##"
-            lines = [re.sub(r'^#{1,6}\s+', '', ln.strip()) for ln in txt.split("\n") if ln.strip()]
+            lines = [re.sub(r"^#{1,6}\s+", "", ln.strip()) for ln in txt.split("\n") if ln.strip()]
             from .rules import rules as _rules
+
             R = _rules()
             if R is not None and len(lines) > 1:
                 joined = [lines[0]]
@@ -581,11 +732,13 @@ def _sx_markdown(items: list[dict[str, Any]]) -> str:
                     prev = joined[-1]
                     pw = re.sub(r"[*_]", "", prev).rstrip()
                     nw = re.sub(r"^[*_]+", "", ln).lstrip()
-                    act = R.decide("heading_join",
-                                   prev_connector=bool(re.search(_CONNECTOR_RE, pw)),
-                                   prev_punct=pw.endswith((".", ":", ";", "!", "?")),
-                                   next_lower=bool(nw[:1]) and nw[:1].islower(),
-                                   same_case=(pw.upper() == pw) == (nw.upper() == nw))
+                    act = R.decide(
+                        "heading_join",
+                        prev_connector=bool(re.search(_CONNECTOR_RE, pw)),
+                        prev_punct=pw.endswith((".", ":", ";", "!", "?")),
+                        next_lower=bool(nw[:1]) and nw[:1].islower(),
+                        same_case=(pw.upper() == pw) == (nw.upper() == nw),
+                    )
                     if act == "join":
                         joined[-1] = prev + " " + ln
                     else:
@@ -627,8 +780,14 @@ def _apply_emphasis(md: str, claim: dict, R: Any) -> tuple[str, dict]:
                 bare = re.sub(r"^\s*(#{1,6}\s+|[-*•]\s+)", "", ln).replace("**", "").strip()
                 if bare == t:
                     already = ln.lstrip().startswith("#")
-                    v = R.decide("emphasis_residual", kind="heading", found="exact",
-                                 length="short" if len(t.split()) <= 12 else "long", already=already, page_share=band)
+                    v = R.decide(
+                        "emphasis_residual",
+                        kind="heading",
+                        found="exact",
+                        length="short" if len(t.split()) <= 12 else "long",
+                        already=already,
+                        page_share=band,
+                    )
                     if v == "admit":
                         lines[j] = "#" * lvl + " " + bare
                         st["heading_admit"] += 1
@@ -638,7 +797,9 @@ def _apply_emphasis(md: str, claim: dict, R: Any) -> tuple[str, dict]:
                     break
             new_parts.append("\n".join(lines))
         if not done:
-            R.decide("emphasis_residual", kind="heading", found="absent", length="short", already=False, page_share=band)
+            R.decide(
+                "emphasis_residual", kind="heading", found="absent", length="short", already=False, page_share=band
+            )
             st["reject"] += 1
         parts = new_parts
     for b in claim.get("bold", []):
@@ -650,11 +811,17 @@ def _apply_emphasis(md: str, claim: dict, R: Any) -> tuple[str, dict]:
             k = p.find(t)
             if k >= 0:
                 found = True
-                already = p[max(0, k - 2):k] == "**" or bool(re.match(r"^\s*#", p[:k].split("\n")[-1] + " "))
-                v = R.decide("emphasis_residual", kind="bold", found="exact",
-                             length="short" if len(t.split()) <= 12 else "long", already=already, page_share=band)
+                already = p[max(0, k - 2) : k] == "**" or bool(re.match(r"^\s*#", p[:k].split("\n")[-1] + " "))
+                v = R.decide(
+                    "emphasis_residual",
+                    kind="bold",
+                    found="exact",
+                    length="short" if len(t.split()) <= 12 else "long",
+                    already=already,
+                    page_share=band,
+                )
                 if v == "admit":
-                    parts[i] = p[:k] + "**" + t + "**" + p[k + len(t):]
+                    parts[i] = p[:k] + "**" + t + "**" + p[k + len(t) :]
                     st["bold_admit"] += 1
                 else:
                     st["reject"] += 1
@@ -665,8 +832,9 @@ def _apply_emphasis(md: str, claim: dict, R: Any) -> tuple[str, dict]:
     return "".join(parts), st
 
 
-
-def _apply_tables(page: Any, pd: dict[str, Any], items: list[dict[str, Any]], R: Any, proposer: str = "vlm") -> tuple[list[dict[str, Any]], dict]:
+def _apply_tables(
+    page: Any, pd: dict[str, Any], items: list[dict[str, Any]], R: Any, proposer: str = "vlm"
+) -> tuple[list[dict[str, Any]], dict]:
     """O12: reconcile ruling-line PDF tables with the proposer's table items."""
     ptabs = floor.pdf_tables(page)
     if not ptabs:
@@ -679,8 +847,11 @@ def _apply_tables(page: Any, pd: dict[str, Any], items: list[dict[str, Any]], R:
         match = None
         for k, it in enumerate(out):
             b = it.get("bbox")
-            if (it.get("label") or "").lower() == "table" and isinstance(b, list) and (
-                    floor._iou(b, tb) >= 0.3 or floor._ioa(tb, b) >= 0.5 or floor._ioa(b, tb) >= 0.5):
+            if (
+                (it.get("label") or "").lower() == "table"
+                and isinstance(b, list)
+                and (floor._iou(b, tb) >= 0.3 or floor._ioa(tb, b) >= 0.5 or floor._ioa(b, tb) >= 0.5)
+            ):
                 match = k
                 break
         vtxt = out[match].get("text", "") if match is not None else ""
@@ -691,15 +862,29 @@ def _apply_tables(page: Any, pd: dict[str, Any], items: list[dict[str, Any]], R:
             agr = "low" if agr == "empty" else agr
         else:
             shape, agr = "na", "na"
-        act = R.decide("table_source", proposer=proposer, vlm="present" if match is not None else "absent",
-                       pdf="trivial" if t["rows"] < 2 or t["cols"] < 2 else "ok", authority=auth, agreement=agr, shape=shape)
+        act = R.decide(
+            "table_source",
+            proposer=proposer,
+            vlm="present" if match is not None else "absent",
+            pdf="trivial" if t["rows"] < 2 or t["cols"] < 2 else "ok",
+            authority=auth,
+            agreement=agr,
+            shape=shape,
+        )
         st[act] += 1
         if act == "use_pdf":
             out[match]["text"] = t["html"]
         elif act == "add_pdf":
             # drop plain text blocks that only duplicate the table's cells, then insert the table in reading position
-            out = [it for it in out if not (isinstance(it.get("bbox"), list) and (it.get("label") or "").lower() not in ("table", "picture", "figure")
-                                            and floor._ioa(it["bbox"], tb) >= 0.8)]
+            out = [
+                it
+                for it in out
+                if not (
+                    isinstance(it.get("bbox"), list)
+                    and (it.get("label") or "").lower() not in ("table", "picture", "figure")
+                    and floor._ioa(it["bbox"], tb) >= 0.8
+                )
+            ]
             pos = len(out)
             for k, it in enumerate(out):
                 b = it.get("bbox")
@@ -710,8 +895,9 @@ def _apply_tables(page: Any, pd: dict[str, Any], items: list[dict[str, Any]], R:
     return out, st
 
 
-
-def _apply_table_requery(page: Any, pd: dict[str, Any], items: list[dict[str, Any]], claims: list[dict], R: Any) -> tuple[list[dict[str, Any]], dict]:
+def _apply_table_requery(
+    page: Any, pd: dict[str, Any], items: list[dict[str, Any]], claims: list[dict], R: Any
+) -> tuple[list[dict[str, Any]], dict]:
     """O13: accept zoomed re-queries of the proposer's own tables (SX_TABLE_REQ_FORCE=1 accepts all: pilot only)."""
     out = [dict(it) for it in items]
     st = {"accept": 0, "keep": 0}
@@ -731,10 +917,14 @@ def _apply_table_requery(page: Any, pd: dict[str, Any], items: list[dict[str, An
         before, after, bb = out[k].get("text", ""), c["html"], out[k].get("bbox")
         agr = floor.agreement_band(before, after)
         agr = "low" if agr == "empty" else agr
-        v = R.decide("table_requery", before_consistent=floor.html_grid_consistent(before),
-                     after_consistent=floor.html_grid_consistent(after), agreement=agr,
-                     grid_before=grid_fact(before, bb) if isinstance(bb, list) else "none",
-                     grid_after=grid_fact(after, bb) if isinstance(bb, list) else "none")
+        v = R.decide(
+            "table_requery",
+            before_consistent=floor.html_grid_consistent(before),
+            after_consistent=floor.html_grid_consistent(after),
+            agreement=agr,
+            grid_before=grid_fact(before, bb) if isinstance(bb, list) else "none",
+            grid_after=grid_fact(after, bb) if isinstance(bb, list) else "none",
+        )
         if force or v == "accept":
             out[k]["text"] = after
             st["accept"] += 1

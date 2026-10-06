@@ -1,4 +1,5 @@
 """ByteVerity provider: decision-table integrity/completeness and an offline end-to-end run (mocked API, no network)."""
+
 import json
 import math
 import os
@@ -38,7 +39,9 @@ def test_tampered_table_is_refused(tmp_path, monkeypatch):
 
 
 def test_out_of_domain_facts_are_refused():
-    r = bv_tables.table("page_route").evaluate({"vlm_status": "ok", "text_layer": "bogus", "recall": "na", "escalated": False})
+    r = bv_tables.table("page_route").evaluate(
+        {"vlm_status": "ok", "text_layer": "bogus", "recall": "na", "escalated": False}
+    )
     assert r["status"] == "INVALID_INPUT"
 
 
@@ -47,10 +50,16 @@ class _Completions:
 
     def create(self, **kw):
         _Completions.calls.append(kw)
-        usage = NS(prompt_tokens=3000, completion_tokens=1200, prompt_tokens_details=NS(cached_tokens=1000),
-                   completion_tokens_details=NS(reasoning_tokens=200))
-        body = '<div data-bbox="[100,100,900,200]" data-label="Title">Hello</div>\n' \
-               '<div data-bbox="[100,300,900,400]" data-label="Text">World</div>'
+        usage = NS(
+            prompt_tokens=3000,
+            completion_tokens=1200,
+            prompt_tokens_details=NS(cached_tokens=1000),
+            completion_tokens_details=NS(reasoning_tokens=200),
+        )
+        body = (
+            '<div data-bbox="[100,100,900,200]" data-label="Title">Hello</div>\n'
+            '<div data-bbox="[100,300,900,400]" data-label="Text">World</div>'
+        )
         return NS(usage=usage, choices=[NS(message=NS(content=body))])
 
 
@@ -72,10 +81,20 @@ def test_offline_end_to_end_with_mocked_api(tmp_path, monkeypatch):
     from parse_bench.schemas.pipeline_io import InferenceRequest
     from parse_bench.schemas.product import ProductType
 
-    cfg = {"model": "gpt-6-luna", "escalate_model": "gpt-6-luna", "effort": "low", "stage": "full", "transport": "openai"}
+    cfg = {
+        "model": "gpt-6-luna",
+        "escalate_model": "gpt-6-luna",
+        "effort": "low",
+        "stage": "full",
+        "transport": "openai",
+    }
     prov = ByteVerityProvider("byteverity", cfg)
-    spec = PipelineSpec(pipeline_name="byteverity_parse", provider_name="byteverity", product_type=ProductType.PARSE, config=cfg)
-    raw = prov.run_inference(spec, InferenceRequest(example_id="text/t", source_file_path=str(pdf), product_type=ProductType.PARSE))
+    spec = PipelineSpec(
+        pipeline_name="byteverity_parse", provider_name="byteverity", product_type=ProductType.PARSE, config=cfg
+    )
+    raw = prov.run_inference(
+        spec, InferenceRequest(example_id="text/t", source_file_path=str(pdf), product_type=ProductType.PARSE)
+    )
     ro = raw.raw_output
     assert ro["transport"] == "openai" and ro["usage_calls"]
     assert all(c["model"] == "gpt-6-luna" for c in ro["usage_calls"])
@@ -87,5 +106,6 @@ def test_api_transport_does_not_need_codex(monkeypatch):
     monkeypatch.setenv("PATH", "/nonexistent")
     monkeypatch.setenv("HOME", "/nonexistent")
     from parse_bench.inference.providers.parse.byteverity.provider import ByteVerityProvider
+
     prov = ByteVerityProvider("byteverity", {"model": "gpt-6-luna", "transport": "openai", "stage": "full"})
     assert prov._codex is None

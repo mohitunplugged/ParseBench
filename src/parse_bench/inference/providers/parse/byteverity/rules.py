@@ -1,4 +1,6 @@
-"""Rulebook client (sealed decision tables; the synthesa-decide engine is not distributed): every rule-based decision in the synthesa-codex floor goes through a sealed oracle.
+"""Rulebook client (sealed decision tables; the synthesa-decide engine is not distributed):
+
+Every rule-based decision
 
 Python measures facts from the PDF (and reads the proposer's labels); the sealed
 synthesa-decide oracles (research/parsebench/oracle/rules/*.rules.yaml, proven complete
@@ -12,7 +14,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import threading
 from typing import Any
 
@@ -35,7 +36,7 @@ ORACLES = {
 }
 
 _LOCK = threading.Lock()
-_BOOK: "Rulebook | None" = None
+_BOOK: TableRulebook | None = None
 
 
 class TableRulebook:
@@ -43,6 +44,7 @@ class TableRulebook:
 
     def __init__(self) -> None:
         from .tables import table
+
         self._t = {name: table(d) for name, (d, _) in ORACLES.items()}
         self._memo: dict[tuple[str, str], str] = {}
         self.cells: dict[tuple[str, str], str] = {}
@@ -61,9 +63,7 @@ class TableRulebook:
         return v
 
 
-
-
-def rules() -> Rulebook | None:
+def rules() -> TableRulebook | None:
     """The rulebook when SX_ORACLE_RULES=1, else None (legacy in-code rules)."""
     global _BOOK
     if os.environ.get("SX_ORACLE_RULES", "1") != "1":  # default: sealed rulebook (shadow-equivalent on 2,078 docs)

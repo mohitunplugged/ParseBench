@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from typing import Any
 
 from .rules import rules as _rules
-from typing import Any
 
 _TOKEN_RE = re.compile(r"[0-9a-z]+")
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -28,14 +28,18 @@ def page_words(page: Any) -> list[dict[str, Any]]:
     """Words on the 0-1000 grid with their normalized tokens."""
     W, H = page.rect.width, page.rect.height
     out = []
-    for x0, y0, x1, y1, w, b, l, n in page.get_text("words"):
+    for x0, y0, x1, y1, w, b, li, _n in page.get_text("words"):
         toks = norm_tokens(w)
         if not toks:
             continue
-        out.append({
-            "bbox": [x0 / W * 1000, y0 / H * 1000, x1 / W * 1000, y1 / H * 1000],
-            "toks": toks, "block": b, "line": l,
-        })
+        out.append(
+            {
+                "bbox": [x0 / W * 1000, y0 / H * 1000, x1 / W * 1000, y1 / H * 1000],
+                "toks": toks,
+                "block": b,
+                "line": li,
+            }
+        )
     return out
 
 
@@ -74,8 +78,9 @@ def _inside(c: tuple[float, float], bb: list[float], pad: float) -> bool:
     return bb[0] - pad <= c[0] <= bb[2] + pad and bb[1] - pad <= c[1] <= bb[3] + pad
 
 
-def snap_items(items: list[dict[str, Any]], words: list[dict[str, Any]], pad: float = 20.0,
-               min_cover: float = 0.5) -> tuple[list[dict[str, Any]], int]:
+def snap_items(
+    items: list[dict[str, Any]], words: list[dict[str, Any]], pad: float = 20.0, min_cover: float = 0.5
+) -> tuple[list[dict[str, Any]], int]:
     """Replace each VLM box with the union of the PDF words that make up its text.
 
     A word is claimed by a block only if (a) its centre lies inside the VLM
@@ -160,7 +165,9 @@ def _hsegments(page: Any) -> list[tuple[float, float, float, str]]:
     for a in page.annots() or []:
         t = a.type[1].lower()
         if t in ("strikeout", "underline", "highlight"):
-            for v in (a.vertices and [a.vertices[i:i + 4] for i in range(0, len(a.vertices), 4)]) or [[a.rect.tl, a.rect.tr, a.rect.bl, a.rect.br]]:
+            for v in (a.vertices and [a.vertices[i : i + 4] for i in range(0, len(a.vertices), 4)]) or [
+                [a.rect.tl, a.rect.tr, a.rect.bl, a.rect.br]
+            ]:
                 xs = [p[0] for p in v]
                 ys = [p[1] for p in v]
                 segs.append((min(xs), max(xs), (min(ys) + max(ys)) / 2, t))
@@ -195,6 +202,7 @@ def styled_runs(page: Any) -> list[dict[str, Any]]:
     body_size, body_color = 0.0, None
     if R0 is not None:
         import collections as _c
+
         sz: _c.Counter = _c.Counter()
         col: _c.Counter = _c.Counter()
         for block in d.get("blocks", []):
@@ -226,13 +234,31 @@ def styled_runs(page: Any) -> list[dict[str, Any]]:
                 st: set[str] = set()
                 if R0 is not None:
                     fn = s.get("font", "")
-                    name = ("bold" if _BOLD_FONT_RE.search(fn)
-                            else "medium" if re.search(r"medium|bd(?![a-z])", fn, re.IGNORECASE) else "regular")
+                    name = (
+                        "bold"
+                        if _BOLD_FONT_RE.search(fn)
+                        else "medium"
+                        if re.search(r"medium|bd(?![a-z])", fn, re.IGNORECASE)
+                        else "regular"
+                    )
                     rs = s["size"] / body_size if body_size else 1.0
-                    if R0.decide("bold_evidence", flag=bool(s["flags"] & 16), name=name,
-                                 size="smaller" if rs < 0.95 else "body" if rs < 1.15 else "larger" if rs < 1.6 else "much_larger",
-                                 colored=s.get("color", 0) != body_color,
-                                 standalone=len(spans) == 1) == "bold":
+                    if (
+                        R0.decide(
+                            "bold_evidence",
+                            flag=bool(s["flags"] & 16),
+                            name=name,
+                            size="smaller"
+                            if rs < 0.95
+                            else "body"
+                            if rs < 1.15
+                            else "larger"
+                            if rs < 1.6
+                            else "much_larger",
+                            colored=s.get("color", 0) != body_color,
+                            standalone=len(spans) == 1,
+                        )
+                        == "bold"
+                    ):
                         st.add("bold")
                 elif s["flags"] & 16 or _BOLD_FONT_RE.search(s.get("font", "")):
                     st.add("bold")
@@ -248,12 +274,26 @@ def styled_runs(page: Any) -> list[dict[str, Any]]:
                     ov = min(x1, sx1) - max(x0, sx0)
                     if R is not None:
                         rel = (sy - y0) / h
-                        pos = ("above" if rel < 0.35 else "mid" if rel <= 0.75 else "gap" if rel < 0.8
-                               else "base" if rel <= 1.25 else "below")
-                        k = {"line": "rule", "strikeout": "strike_annot", "underline": "underline_annot",
-                             "highlight": "highlight_annot"}[kind]
-                        dec = R.decide("decoration", kind=k, overlap=ov >= 0.6 * w,
-                                       too_wide=(sx1 - sx0) > 1.6 * w + 12, pos=pos)
+                        pos = (
+                            "above"
+                            if rel < 0.35
+                            else "mid"
+                            if rel <= 0.75
+                            else "gap"
+                            if rel < 0.8
+                            else "base"
+                            if rel <= 1.25
+                            else "below"
+                        )
+                        k = {
+                            "line": "rule",
+                            "strikeout": "strike_annot",
+                            "underline": "underline_annot",
+                            "highlight": "highlight_annot",
+                        }[kind]
+                        dec = R.decide(
+                            "decoration", kind=k, overlap=ov >= 0.6 * w, too_wide=(sx1 - sx0) > 1.6 * w + 12, pos=pos
+                        )
                         if dec != "none":
                             st.add(dec)
                         continue
@@ -271,8 +311,15 @@ def styled_runs(page: Any) -> list[dict[str, Any]]:
                 for r in marks:
                     if r.x0 <= x0 + 1 and r.x1 >= x1 - 1 and r.y0 <= y0 + h * 0.3 and r.y1 >= y1 - h * 0.3:
                         st.add("mark")
-                runs.append({"text": s["text"], "styles": st, "size": s["size"],
-                             "bbox": (x0, y0, x1, y1), "line_key": (id(block), id(line))})
+                runs.append(
+                    {
+                        "text": s["text"],
+                        "styles": st,
+                        "size": s["size"],
+                        "bbox": (x0, y0, x1, y1),
+                        "line_key": (id(block), id(line)),
+                    }
+                )
     return runs
 
 
@@ -310,20 +357,24 @@ def _phrase_re(phrase: str) -> re.Pattern[str] | None:
     return re.compile(r"(?<![\w*~])" + r"[ \t]+".join(parts) + r"(?![\w*~])")
 
 
-def _wrap_outside_tables(text: str, pat: re.Pattern[str], left: str, right: str, already: re.Pattern[str]) -> tuple[str, int]:
+def _wrap_outside_tables(
+    text: str, pat: re.Pattern[str], left: str, right: str, already: re.Pattern[str]
+) -> tuple[str, int]:
     n = 0
     chunks = _TABLE_SPLIT_RE.split(text)
     for i, ch in enumerate(chunks):
         if i % 2 == 1:
             continue  # table chunk
-        def _sub(m: re.Match[str]) -> str:
+
+        def _sub(m: re.Match[str], ch: str = ch) -> str:
             nonlocal n
             # skip if this occurrence is already styled
-            pre = ch[max(0, m.start() - 4):m.start()]
+            pre = ch[max(0, m.start() - 4) : m.start()]
             if already.search(pre + "\0"):
                 return m.group(0)
             n += 1
             return f"{left}{m.group(0)}{right}"
+
         chunks[i] = pat.sub(_sub, ch, count=1)
     return "".join(chunks), n
 
@@ -334,11 +385,13 @@ _ALREADY = {
 }
 
 
-def inject_markup(items: list[dict[str, Any]], runs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def inject_markup(
+    items: list[dict[str, Any]], runs: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Wrap PDF-bold / strike phrases, and sup/sub glyph runs, inside matching blocks."""
     stats = {"bold": 0, "strike": 0, "sup": 0, "sub": 0}
     out = [dict(it) for it in items]
-    for style, (l, r) in (("bold", ("**", "**")), ("strike", ("~~", "~~"))):
+    for style, (li, r) in (("bold", ("**", "**")), ("strike", ("~~", "~~"))):
         for phrase in merge_runs(runs, style):
             if len(phrase) < 2 or not any(c.isalnum() for c in phrase):
                 continue
@@ -349,8 +402,13 @@ def inject_markup(items: list[dict[str, Any]], runs: list[dict[str, Any]]) -> tu
             for it in out:
                 lab = (it.get("label") or "").lower()
                 if R is not None:
-                    blk = ("table_picture_formula" if lab in ("table", "picture", "formula")
-                           else "heading" if lab in ("title", "section-header") else "other")
+                    blk = (
+                        "table_picture_formula"
+                        if lab in ("table", "picture", "formula")
+                        else "heading"
+                        if lab in ("title", "section-header")
+                        else "other"
+                    )
                     if blk == "table_picture_formula":
                         if R.decide("markup_inject", style=style, block=blk, already=False) == "skip_block":
                             continue
@@ -361,7 +419,7 @@ def inject_markup(items: list[dict[str, Any]], runs: list[dict[str, Any]]) -> tu
                     if act == "skip_block":
                         continue
                     if act == "wrap":
-                        new, k = _wrap_outside_tables(txt, pat, l, r, _ALREADY[style])
+                        new, k = _wrap_outside_tables(txt, pat, li, r, _ALREADY[style])
                         if k:
                             it["text"] = new
                             stats[style] += k
@@ -373,7 +431,7 @@ def inject_markup(items: list[dict[str, Any]], runs: list[dict[str, Any]]) -> tu
                     # headings already count as bold; don't double-mark them
                     if style == "bold" and lab in ("title", "section-header"):
                         break
-                    new, k = _wrap_outside_tables(txt, pat, l, r, _ALREADY[style])
+                    new, k = _wrap_outside_tables(txt, pat, li, r, _ALREADY[style])
                     if k:
                         it["text"] = new
                         stats[style] += k
@@ -392,16 +450,21 @@ def inject_markup(items: list[dict[str, Any]], runs: list[dict[str, Any]]) -> tu
                 for it in out:
                     lab = (it.get("label") or "").lower()
                     if R is not None:
-                        blk = ("table_picture_formula" if lab in ("table", "picture", "formula")
-                               else "heading" if lab in ("title", "section-header") else "other")
+                        blk = (
+                            "table_picture_formula"
+                            if lab in ("table", "picture", "formula")
+                            else "heading"
+                            if lab in ("title", "section-header")
+                            else "other"
+                        )
                         if R.decide("markup_inject", style=style, block=blk, already=False) != "wrap":
                             continue
                     elif lab in ("table", "picture", "formula"):
                         continue
                     txt = it.get("text", "")
                     m = pat.search(txt)
-                    if m and f"<{style}>" not in txt[m.start():m.end() + 6]:
-                        it["text"] = txt[:m.start()] + anchor + f"<{style}>{g}</{style}>" + txt[m.end():]
+                    if m and f"<{style}>" not in txt[m.start() : m.end() + 6]:
+                        it["text"] = txt[: m.start()] + anchor + f"<{style}>{g}</{style}>" + txt[m.end() :]
                         stats[style] += 1
                         break
         if not ({"sup", "sub"} & rr["styles"]):
@@ -417,17 +480,17 @@ _LIST_RE = re.compile(r"^\s*([•\-–·▪■●◦]|\(?\d{1,2}[.)]|\(?[a-zA-Z]
 _BOLD_NAME_RE = re.compile(r"bold|black|semibold|heavy", re.IGNORECASE)
 
 
-def _line_text(l: dict[str, Any]) -> str:
-    return "".join(s["text"] for s in l["spans"])
+def _line_text(li: dict[str, Any]) -> str:
+    return "".join(s["text"] for s in li["spans"])
 
 
-def _line_bold(l: dict[str, Any]) -> bool:
-    sp = [s for s in l["spans"] if s["text"].strip()]
+def _line_bold(li: dict[str, Any]) -> bool:
+    sp = [s for s in li["spans"] if s["text"].strip()]
     return bool(sp) and all((s["flags"] & 16) or _BOLD_NAME_RE.search(s["font"]) for s in sp)
 
 
-def _line_size(l: dict[str, Any]) -> float:
-    return max((s["size"] for s in l["spans"] if s["text"].strip()), default=0.0)
+def _line_size(li: dict[str, Any]) -> float:
+    return max((s["size"] for s in li["spans"] if s["text"].strip()), default=0.0)
 
 
 def pdf_segments(page: Any) -> list[dict[str, Any]]:
@@ -437,45 +500,55 @@ def pdf_segments(page: Any) -> list[dict[str, Any]]:
     for b in page.get_text("dict")["blocks"]:
         if b.get("type") != 0:
             continue
-        lines = [l for l in b["lines"] if _line_text(l).strip()]
+        lines = [li for li in b["lines"] if _line_text(li).strip()]
         if not lines:
             continue
         groups: list[list[dict[str, Any]]] = []
         cur = [lines[0]]
         R = _rules()
-        for prev, l in zip(lines, lines[1:]):
-            gap = l["bbox"][1] - prev["bbox"][3]
+        for prev, li in zip(lines, lines[1:], strict=False):
+            gap = li["bbox"][1] - prev["bbox"][3]
             if R is not None:
                 ps = _line_size(prev)
                 ratio = gap / ps if ps > 0 else (float("inf") if gap > 0 else 0.0)
-                b = R.decide("line_boundary", list_marker=bool(_LIST_RE.match(_line_text(l))),
-                             bold_change=_line_bold(l) != _line_bold(prev),
-                             size_jump=abs(_line_size(l) - ps) > 1,
-                             gap="tight" if ratio < 0.3 else "normal" if ratio <= 0.8 else "wide")
+                b = R.decide(
+                    "line_boundary",
+                    list_marker=bool(_LIST_RE.match(_line_text(li))),
+                    bold_change=_line_bold(li) != _line_bold(prev),
+                    size_jump=abs(_line_size(li) - ps) > 1,
+                    gap="tight" if ratio < 0.3 else "normal" if ratio <= 0.8 else "wide",
+                )
                 if b == "split":
                     groups.append(cur)
-                    cur = [l]
+                    cur = [li]
                 else:
-                    cur.append(l)
+                    cur.append(li)
                 continue
-            if (_LIST_RE.match(_line_text(l)) or _line_bold(l) != _line_bold(prev)
-                    or abs(_line_size(l) - _line_size(prev)) > 1 or gap > 0.8 * _line_size(prev)):
+            if (
+                _LIST_RE.match(_line_text(li))
+                or _line_bold(li) != _line_bold(prev)
+                or abs(_line_size(li) - _line_size(prev)) > 1
+                or gap > 0.8 * _line_size(prev)
+            ):
                 groups.append(cur)
-                cur = [l]
+                cur = [li]
             else:
-                cur.append(l)
+                cur.append(li)
         groups.append(cur)
         for g in groups:
-            x0 = min(l["bbox"][0] for l in g)
-            y0 = min(l["bbox"][1] for l in g)
-            x1 = max(l["bbox"][2] for l in g)
-            y1 = max(l["bbox"][3] for l in g)
-            out.append({
-                "bbox": [x0 / W * 1000, y0 / H * 1000, x1 / W * 1000, y1 / H * 1000],
-                "text": " ".join(" ".join(_line_text(l).split()) for l in g),
-                "bold": all(_line_bold(l) for l in g), "nlines": len(g),
-                "size": max(_line_size(l) for l in g),
-            })
+            x0 = min(li["bbox"][0] for li in g)
+            y0 = min(li["bbox"][1] for li in g)
+            x1 = max(li["bbox"][2] for li in g)
+            y1 = max(li["bbox"][3] for li in g)
+            out.append(
+                {
+                    "bbox": [x0 / W * 1000, y0 / H * 1000, x1 / W * 1000, y1 / H * 1000],
+                    "text": " ".join(" ".join(_line_text(li).split()) for li in g),
+                    "bold": all(_line_bold(li) for li in g),
+                    "nlines": len(g),
+                    "size": max(_line_size(li) for li in g),
+                }
+            )
     return out
 
 
@@ -492,12 +565,19 @@ KEEP_INNER = __import__("os").environ.get("SX_KEEPINNER", "1") == "1"  # admitte
 
 def grounding_items(vlm_items: list[dict[str, Any]], segs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Layout elements = VLM regions for tables/pictures/furniture + PDF segments for everything else."""
-    regions = [(i, it) for i, it in enumerate(vlm_items)
-               if (it.get("label") or "").lower() in _REGION_LABELS and isinstance(it.get("bbox"), list)]
-    textual = [(i, it) for i, it in enumerate(vlm_items)
-               if (it.get("label") or "").lower() not in _REGION_LABELS and isinstance(it.get("bbox"), list)]
+    regions = [
+        (i, it)
+        for i, it in enumerate(vlm_items)
+        if (it.get("label") or "").lower() in _REGION_LABELS and isinstance(it.get("bbox"), list)
+    ]
+    textual = [
+        (i, it)
+        for i, it in enumerate(vlm_items)
+        if (it.get("label") or "").lower() not in _REGION_LABELS and isinstance(it.get("bbox"), list)
+    ]
     out: list[tuple[tuple[float, float, float], dict[str, Any]]] = []
     import os as _os
+
     sec_rules = _os.environ.get("SX_SECTIONRULES", "0") == "1"
     # body size = length-weighted median segment font size
     sizes = sorted((sg["size"], len(sg["text"])) for sg in segs)
@@ -514,8 +594,13 @@ def grounding_items(vlm_items: list[dict[str, Any]], segs: list[dict[str, Any]])
         sb = sg["bbox"]
         if R is not None:
             inside = [it for _, it in regions if _ioa(sb, it["bbox"]) >= 0.5]
-            region = ("header_footer" if any((it.get("label") or "").lower() in ("page-header", "page-footer") for it in inside)
-                      else "table_picture" if inside else "none")
+            region = (
+                "header_footer"
+                if any((it.get("label") or "").lower() in ("page-header", "page-footer") for it in inside)
+                else "table_picture"
+                if inside
+                else "none"
+            )
             best, best_ov = None, 0.0
             for i, it in textual:
                 ov = _ioa(sb, it["bbox"])
@@ -532,12 +617,23 @@ def grounding_items(vlm_items: list[dict[str, Any]], segs: list[dict[str, Any]])
             numeric = bool(toks) and sum(1 for w in toks if re.fullmatch(r"[\d.,%$€£()+\-–/]+", w)) / len(toks) >= 0.5
             caption = bool(re.match(r"(?i)^(table|figure|fig\.?|chart|exhibit|source|note)s?\s*[\dA-Z]", t))
             rs = sg["text"].rstrip()
-            role = R.decide("element_role", region=region, vlm=vlm, bold=bool(sg["bold"]),
-                            lines="one" if sg["nlines"] == 1 else "two" if sg["nlines"] == 2 else "many",
-                            short=len(sg["text"].split()) <= 14,
-                            end_punct="sentence" if rs.endswith((".", ",", ";")) else "colon" if rs.endswith(":") else "none",
-                            numeric=numeric, caption=caption, paren=t.startswith("("),
-                            size="smaller" if body and sg["size"] < 0.95 * body else "larger" if body and sg["size"] >= 1.15 * body else "body")
+            role = R.decide(
+                "element_role",
+                region=region,
+                vlm=vlm,
+                bold=bool(sg["bold"]),
+                lines="one" if sg["nlines"] == 1 else "two" if sg["nlines"] == 2 else "many",
+                short=len(sg["text"].split()) <= 14,
+                end_punct="sentence" if rs.endswith((".", ",", ";")) else "colon" if rs.endswith(":") else "none",
+                numeric=numeric,
+                caption=caption,
+                paren=t.startswith("("),
+                size="smaller"
+                if body and sg["size"] < 0.95 * body
+                else "larger"
+                if body and sg["size"] >= 1.15 * body
+                else "body",
+            )
             if role == "drop":
                 continue
             label = {"title": "Title", "section": "Section-header", "text": "Text"}.get(role)
@@ -546,7 +642,9 @@ def grounding_items(vlm_items: list[dict[str, Any]], segs: list[dict[str, Any]])
             out.append(((order, sb[1], sb[0]), {"bbox": sb, "label": label, "text": sg["text"]}))
             continue
         inside = [it for _, it in regions if _ioa(sb, it["bbox"]) >= 0.5]
-        if inside and (not KEEP_INNER or any((it.get("label") or "").lower() in ("page-header", "page-footer") for it in inside)):
+        if inside and (
+            not KEEP_INNER or any((it.get("label") or "").lower() in ("page-header", "page-footer") for it in inside)
+        ):
             continue  # belongs to a header / footer region (or to any region, when KEEP_INNER is off)
         best, best_ov = None, 0.0
         for i, it in textual:
@@ -561,8 +659,13 @@ def grounding_items(vlm_items: list[dict[str, Any]], segs: list[dict[str, Any]])
             label = {"title": "Title", "section-header": "Section-header"}.get(vl, best[1].get("label") or "Text")
             if vl in ("title", "section-header") and not sg["bold"] and sg["nlines"] > 2:
                 label = "Text"  # a paragraph swallowed into a heading box
-        if label == "Text" and sg["bold"] and sg["nlines"] <= 2 and len(sg["text"].split()) <= 14 \
-                and not sg["text"].rstrip().endswith((".", ",", ";")):
+        if (
+            label == "Text"
+            and sg["bold"]
+            and sg["nlines"] <= 2
+            and len(sg["text"].split()) <= 14
+            and not sg["text"].rstrip().endswith((".", ",", ";"))
+        ):
             label = "Section-header"
         if sec_rules:
             t = sg["text"].strip()
@@ -571,9 +674,17 @@ def grounding_items(vlm_items: list[dict[str, Any]], segs: list[dict[str, Any]])
             caption = re.match(r"(?i)^(table|figure|fig\.?|chart|exhibit|source|note)s?\s*[\dA-Z]", t)
             if label in ("Section-header", "Title") and (numeric or caption or t.startswith("(")):
                 label = "Text"
-            elif label == "Text" and body and sg["size"] >= 1.15 * body and sg["nlines"] <= 2 \
-                    and len(toks) <= 14 and not numeric and not caption and not t.startswith("(") \
-                    and not t.endswith((".", ",", ";", ":")):
+            elif (
+                label == "Text"
+                and body
+                and sg["size"] >= 1.15 * body
+                and sg["nlines"] <= 2
+                and len(toks) <= 14
+                and not numeric
+                and not caption
+                and not t.startswith("(")
+                and not t.endswith((".", ",", ";", ":"))
+            ):
                 label = "Section-header"
         out.append(((order, sb[1], sb[0]), {"bbox": sb, "label": label, "text": sg["text"]}))
     out.sort(key=lambda t: t[0])
@@ -615,22 +726,49 @@ def reconcile_pictures(items: list[dict[str, Any]], images: list[list[float]]) -
             if v > best:
                 best, bi = v, j
         R = _rules()
-        snap = (R.decide("picture_reconcile", subject="vlm_picture", iou="high" if best >= 0.5 else "low", covered=False,
-                           ink_fit="none", text_heavy=False)
-                == "snap_to_image") if R is not None else best >= 0.5
+        snap = (
+            (
+                R.decide(
+                    "picture_reconcile",
+                    subject="vlm_picture",
+                    iou="high" if best >= 0.5 else "low",
+                    covered=False,
+                    ink_fit="none",
+                    text_heavy=False,
+                )
+                == "snap_to_image"
+            )
+            if R is not None
+            else best >= 0.5
+        )
         if snap:
             it["bbox"] = images[bi]
             used.add(bi)
     for j, im in enumerate(images):
         if j in used:
             continue
-        covered = any(isinstance(it.get("bbox"), list) and (_ioa(im, it["bbox"]) > 0.5 or _ioa(it["bbox"], im) > 0.5)
-                      and (it.get("label") or "").lower() in ("picture", "figure", "table")
-                      for it in out)
+        covered = any(
+            isinstance(it.get("bbox"), list)
+            and (_ioa(im, it["bbox"]) > 0.5 or _ioa(it["bbox"], im) > 0.5)
+            and (it.get("label") or "").lower() in ("picture", "figure", "table")
+            for it in out
+        )
         R = _rules()
-        add = (R.decide("picture_reconcile", subject="pdf_image", iou="low", covered=bool(covered),
-                         ink_fit="none", text_heavy=False) == "add_picture") \
-            if R is not None else not covered
+        add = (
+            (
+                R.decide(
+                    "picture_reconcile",
+                    subject="pdf_image",
+                    iou="low",
+                    covered=bool(covered),
+                    ink_fit="none",
+                    text_heavy=False,
+                )
+                == "add_picture"
+            )
+            if R is not None
+            else not covered
+        )
         if add:
             out.append({"bbox": im, "label": "Picture", "text": ""})
     return out
@@ -639,6 +777,7 @@ def reconcile_pictures(items: list[dict[str, Any]], images: list[list[float]]) -
 # ---------------------------------------------------------------------------
 # Graphic-ink components (vector drawings + raster images), on the 0-1000 grid
 # ---------------------------------------------------------------------------
+
 
 def ink_components(page: Any, gap: float = 6.0) -> list[list[float]]:
     """Cluster graphic ink into figure-sized components.
@@ -656,8 +795,8 @@ def ink_components(page: Any, gap: float = 6.0) -> list[list[float]]:
         drawings = []
     line_centres = []
     for b in page.get_text("dict")["blocks"]:
-        for l in b.get("lines", []):
-            x0, y0, x1, y1 = l["bbox"]
+        for li in b.get("lines", []):
+            x0, y0, x1, y1 = li["bbox"]
             line_centres.append(((x0 + x1) / 2, (y0 + y1) / 2))
     for d in drawings:
         r = d["rect"]
@@ -666,8 +805,11 @@ def ink_components(page: Any, gap: float = 6.0) -> list[list[float]]:
         a = r.width * r.height
         if a > 0.25 * PA:
             continue
-        if d.get("fill") is not None and a > 0.004 * PA and any(
-                r.x0 <= cx <= r.x1 and r.y0 <= cy <= r.y1 for cx, cy in line_centres):
+        if (
+            d.get("fill") is not None
+            and a > 0.004 * PA
+            and any(r.x0 <= cx <= r.x1 and r.y0 <= cy <= r.y1 for cx, cy in line_centres)
+        ):
             continue  # a panel / box behind text, not figure ink
         thin = min(r.width, r.height) < 2.0
         if thin and max(r.width, r.height) > 0.3 * W:
@@ -695,7 +837,7 @@ def ink_components(page: Any, gap: float = 6.0) -> list[list[float]]:
     order = sorted(range(n), key=lambda i: rects[i][0])
     for ai, i in enumerate(order):
         ri = rects[i]
-        for j in order[ai + 1:]:
+        for j in order[ai + 1 :]:
             rj = rects[j]
             if rj[0] > ri[2] + gap:
                 break
@@ -713,7 +855,7 @@ def ink_components(page: Any, gap: float = 6.0) -> list[list[float]]:
         else:
             groups[g] = list(r)
     out = []
-    for b in list(groups.values()) + images:   # raster images stand alone: adjacent photos are separate figures
+    for b in list(groups.values()) + images:  # raster images stand alone: adjacent photos are separate figures
         a = (b[2] - b[0]) * (b[3] - b[1])
         if a < 0.0008 * PA or (b[2] - b[0]) < 8 or (b[3] - b[1]) < 8:
             continue
@@ -721,12 +863,15 @@ def ink_components(page: Any, gap: float = 6.0) -> list[list[float]]:
     return out
 
 
-def reconcile_ink(items: list[dict[str, Any]], comps: list[list[float]], segs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def reconcile_ink(
+    items: list[dict[str, Any]], comps: list[list[float]], segs: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Tighten oversized VLM picture boxes to the ink they contain; add ink figures the proposer missed.
 
     A component that is mostly text (>=60% of its area under PDF text segments) is a
     text panel/table grid, not a figure, and is ignored.
     """
+
     def text_share(c: list[float]) -> float:
         A = max(1e-9, (c[2] - c[0]) * (c[3] - c[1]))
         s = 0.0
@@ -739,8 +884,19 @@ def reconcile_ink(items: list[dict[str, Any]], comps: list[list[float]], segs: l
 
     R = _rules()
     if R is not None:
-        comps = [c for c in comps if R.decide("picture_reconcile", subject="ink_component", iou="low", covered=False,
-                                              ink_fit="none", text_heavy=text_share(c) >= 0.6) == "add_picture"]
+        comps = [
+            c
+            for c in comps
+            if R.decide(
+                "picture_reconcile",
+                subject="ink_component",
+                iou="low",
+                covered=False,
+                ink_fit="none",
+                text_heavy=text_share(c) >= 0.6,
+            )
+            == "add_picture"
+        ]
     else:
         comps = [c for c in comps if text_share(c) < 0.6]
     out = [dict(it) for it in items]
@@ -752,31 +908,60 @@ def reconcile_ink(items: list[dict[str, Any]], comps: list[list[float]], segs: l
         inside = [k for k, c in enumerate(comps) if _ioa(c, bb) >= 0.8]
         if not inside:
             continue
-        u = [min(comps[k][0] for k in inside), min(comps[k][1] for k in inside),
-             max(comps[k][2] for k in inside), max(comps[k][3] for k in inside)]
-        A = lambda b: max(1e-9, (b[2] - b[0]) * (b[3] - b[1]))
+        u = [
+            min(comps[k][0] for k in inside),
+            min(comps[k][1] for k in inside),
+            max(comps[k][2] for k in inside),
+            max(comps[k][3] for k in inside),
+        ]
+
+        def A(b: list[float]) -> float:
+            return max(1e-9, (b[2] - b[0]) * (b[3] - b[1]))
+
         if R is not None:
             fit = "tight" if A(u) < 0.5 * A(bb) else "loose"
-            if R.decide("picture_reconcile", subject="vlm_picture", iou="low", covered=False,
-                        ink_fit=fit, text_heavy=False) == "shrink_to_ink":
+            if (
+                R.decide(
+                    "picture_reconcile", subject="vlm_picture", iou="low", covered=False, ink_fit=fit, text_heavy=False
+                )
+                == "shrink_to_ink"
+            ):
                 it["bbox"] = u
         elif A(u) < 0.5 * A(bb):
             it["bbox"] = u
         used.update(inside)
     import os as _os
+
     if _os.environ.get("SX_INKALL", "1") == "1":  # admitted by ratchet R7
         for c in comps:
             dup = any(isinstance(it.get("bbox"), list) and _iou(c, it["bbox"]) > 0.9 for it in out)
-            add = (R.decide("picture_reconcile", subject="ink_component", iou="low", covered=dup,
-                            ink_fit="none", text_heavy=False) == "add_picture") if R is not None else not dup
+            add = (
+                (
+                    R.decide(
+                        "picture_reconcile",
+                        subject="ink_component",
+                        iou="low",
+                        covered=dup,
+                        ink_fit="none",
+                        text_heavy=False,
+                    )
+                    == "add_picture"
+                )
+                if R is not None
+                else not dup
+            )
             if add:
                 out.append({"bbox": c, "label": "Picture", "text": ""})
         return out
     for k, c in enumerate(comps):
         if k in used:
             continue
-        covered = any(isinstance(it.get("bbox"), list) and (_ioa(c, it["bbox"]) > 0.5 or _ioa(it["bbox"], c) > 0.5)
-                      and (it.get("label") or "").lower() in ("picture", "figure", "table") for it in out)
+        covered = any(
+            isinstance(it.get("bbox"), list)
+            and (_ioa(c, it["bbox"]) > 0.5 or _ioa(it["bbox"], c) > 0.5)
+            and (it.get("label") or "").lower() in ("picture", "figure", "table")
+            for it in out
+        )
         if not covered:
             out.append({"bbox": c, "label": "Picture", "text": ""})
     return out
@@ -797,8 +982,13 @@ def merged_segments(segs: list[dict[str, Any]], gapk: float = 0.6) -> list[dict[
             xov = min(pb[2], sb[2]) - max(pb[0], sb[0])
             gap = sb[1] - pb[3]
             lh = (pb[3] - pb[1]) / max(1, p["nlines"])
-            if (xov > 0.6 * min(pb[2] - pb[0], sb[2] - sb[0]) and 0 <= gap < gapk * lh
-                    and p["bold"] == s["bold"] and abs(p["size"] - s["size"]) <= 1 and not p["bold"]):
+            if (
+                xov > 0.6 * min(pb[2] - pb[0], sb[2] - sb[0])
+                and 0 <= gap < gapk * lh
+                and p["bold"] == s["bold"]
+                and abs(p["size"] - s["size"]) <= 1
+                and not p["bold"]
+            ):
                 p["bbox"] = [min(pb[0], sb[0]), pb[1], max(pb[2], sb[2]), sb[3]]
                 p["nlines"] += s["nlines"]
                 p["text"] += " " + s["text"]
@@ -806,7 +996,7 @@ def merged_segments(segs: list[dict[str, Any]], gapk: float = 0.6) -> list[dict[
                 continue
         out.append(dict(s, bbox=list(s["bbox"])))
         merged_any.append(False)
-    return [s for s, m in zip(out, merged_any) if m]
+    return [s for s, m in zip(out, merged_any, strict=False) if m]
 
 
 # ---------------------------------------------------------------------------
@@ -827,8 +1017,8 @@ def text_layer_validity_facts(page: Any) -> dict[str, Any]:
     bad = (len(_BAD_CHAR_RE.findall(text)) + 5 * text.count("(cid:")) / max(1, len(text))
     alpha0 = tot = 0
     for b in page.get_text("dict")["blocks"]:
-        for l in b.get("lines", []):
-            for s in l["spans"]:
+        for li in b.get("lines", []):
+            for s in li["spans"]:
                 k = len(s["text"].strip())
                 tot += k
                 alpha0 += k if s.get("alpha", 255) == 0 else 0
@@ -842,7 +1032,7 @@ def text_layer_validity_facts(page: Any) -> dict[str, Any]:
         hit = cnt = 0
         for i in range(0, len(words), max(1, len(words) // 200)):
             x0, y0, x1, y1 = words[i][:4]
-            r = a[max(0, int(y0 * sy)):int(y1 * sy) + 1, max(0, int(x0 * sx)):int(x1 * sx) + 1]
+            r = a[max(0, int(y0 * sy)) : int(y1 * sy) + 1, max(0, int(x0 * sx)) : int(x1 * sx) + 1]
             cnt += 1
             hit += bool(r.size) and (r < 160).mean() > 0.03
         align = hit / max(1, cnt)
@@ -850,8 +1040,10 @@ def text_layer_validity_facts(page: Any) -> dict[str, Any]:
         "tl_class": text_layer_class(page_words(page), page),
         "encoding": "clean" if bad < 0.005 else "degraded" if bad < 0.05 else "garbage",
         "visibility": "mostly_invisible" if alpha0 / max(1, tot) > 0.5 else "visible",
-        "scan_overlay": any((im["bbox"][2] - im["bbox"][0]) * (im["bbox"][3] - im["bbox"][1]) >= 0.85 * W * H
-                            for im in page.get_image_info()),
+        "scan_overlay": any(
+            (im["bbox"][2] - im["bbox"][0]) * (im["bbox"][3] - im["bbox"][1]) >= 0.85 * W * H
+            for im in page.get_image_info()
+        ),
         "alignment": "aligned" if align >= 0.85 else "partial" if align >= 0.6 else "misaligned",
         "duplicated": dup > 0.10,
     }
@@ -864,7 +1056,9 @@ def text_layer_validity_facts(page: Any) -> dict[str, Any]:
 _OWNER_LABELS_SELF = ("table", "picture", "figure", "formula", "page-header", "page-footer")
 
 
-def word_ownership(page: Any, items: list[dict[str, Any]], pad: float = 4.0) -> tuple[dict[int, list[tuple]], list[tuple]]:
+def word_ownership(
+    page: Any, items: list[dict[str, Any]], pad: float = 4.0
+) -> tuple[dict[int, list[tuple]], list[tuple]]:
     """Assign each PDF word to the smallest item box containing its centre. Returns ({item_idx: words}, orphans).
 
     Words are raw PyMuPDF tuples (x0,y0,x1,y1,text,block,line,wordno) with coords on the 0-1000 grid.
@@ -906,16 +1100,16 @@ def words_to_text(words: list[tuple]) -> str:
 
 
 def label_class(label: str) -> str:
-    l = (label or "").lower()
-    if l in ("title", "section-header", "section_header"):
+    li = (label or "").lower()
+    if li in ("title", "section-header", "section_header"):
         return "heading"
-    if l in ("text",):
+    if li in ("text",):
         return "prose"
-    if l in ("list-item", "list"):
+    if li in ("list-item", "list"):
         return "list"
-    if l == "caption":
+    if li == "caption":
         return "caption"
-    if l == "footnote":
+    if li == "footnote":
         return "footnote"
     return "other"
 
@@ -929,7 +1123,10 @@ def agreement_band(vlm_text: str, pdf_text: str) -> str:
 
 
 def orphan_items(orphans: list[tuple], items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Group orphan words by PDF (block, line) runs into Text blocks, inserted before the first same-column item below them."""
+    """Group orphan words by PDF (block, line) runs into Text blocks.
+
+    Each block is inserted before the first same-column item below it.
+    """
     by_block: dict[int, list[tuple]] = {}
     for w in orphans:
         by_block.setdefault(w[5], []).append(w)
@@ -952,6 +1149,7 @@ def orphan_items(orphans: list[tuple], items: list[dict[str, Any]]) -> list[dict
 # ---------------------------------------------------------------------------
 # Raster floor (O10): ink lines from the rendered page, for pages without text-layer geometry
 # ---------------------------------------------------------------------------
+
 
 def page_ink(page: Any, dpi: int = 100) -> tuple[Any, str]:
     """Binary ink mask (dark pixels) and the page's ink-coverage band."""
@@ -1003,7 +1201,7 @@ def _split_text(text: str, weights: list[float]) -> list[str]:
     out, i = [], 0
     for j, w in enumerate(weights):
         n = len(words) - i if j == k - 1 else round(len(words) * w / tot)
-        out.append(" ".join(words[i:i + n]))
+        out.append(" ".join(words[i : i + n]))
         i += n
     return out
 
@@ -1018,38 +1216,57 @@ def raster_segments(page: Any, items: list[dict[str, Any]], mask: Any, R: Any) -
         bb = it.get("bbox")
         if not (isinstance(bb, list) and len(bb) == 4):
             continue
-        px0 = max(0, int(bb[0] * sx) - 6); py0 = max(0, int(bb[1] * sy) - 6)
-        px1 = min(Wp, int(bb[2] * sx) + 6); py1 = min(Hp, int(bb[3] * sy) + 6)
+        px0 = max(0, int(bb[0] * sx) - 6)
+        py0 = max(0, int(bb[1] * sy) - 6)
+        px1 = min(Wp, int(bb[2] * sx) + 6)
+        py1 = min(Hp, int(bb[3] * sy) + 6)
         lines = _ink_lines(mask, px0, py0, px1, py1)
         if not lines:
             out.append(it)
             continue
-        to1000 = lambda b: [b[0] / sx, b[1] / sy, b[2] / sx, b[3] / sy]
+
+        def to1000(b: list[float]) -> list[float]:
+            return [b[0] / sx, b[1] / sy, b[2] / sx, b[3] / sy]
+
         lab = (it.get("label") or "").lower()
         if lab in _REGION_LABELS or lab == "formula":
-            u = [min(l[0] for l in lines), min(l[1] for l in lines), max(l[2] for l in lines), max(l[3] for l in lines)]
+            u = [
+                min(li[0] for li in lines),
+                min(li[1] for li in lines),
+                max(li[2] for li in lines),
+                max(li[3] for li in lines),
+            ]
             out.append({**it, "bbox": to1000(u)})
             continue
         if __import__("os").environ.get("SX_PIXSPLIT", "1") == "0":
-            u = [min(l[0] for l in lines), min(l[1] for l in lines), max(l[2] for l in lines), max(l[3] for l in lines)]
+            u = [
+                min(li[0] for li in lines),
+                min(li[1] for li in lines),
+                max(li[2] for li in lines),
+                max(li[3] for li in lines),
+            ]
             out.append({**it, "bbox": to1000(u)})
             continue
         groups, cur = [], [lines[0]]
-        for prev, l in zip(lines, lines[1:]):
+        for prev, li in zip(lines, lines[1:], strict=False):
             h = max(1, prev[3] - prev[1])
-            ratio = (l[1] - prev[3]) / h
-            b = R.decide("line_boundary", list_marker=False, bold_change=False,
-                         size_jump=abs((l[3] - l[1]) - h) > 0.3 * h,
-                         gap="tight" if ratio < 0.3 else "normal" if ratio <= 0.8 else "wide")
+            ratio = (li[1] - prev[3]) / h
+            b = R.decide(
+                "line_boundary",
+                list_marker=False,
+                bold_change=False,
+                size_jump=abs((li[3] - li[1]) - h) > 0.3 * h,
+                gap="tight" if ratio < 0.3 else "normal" if ratio <= 0.8 else "wide",
+            )
             if b == "split":
                 groups.append(cur)
-                cur = [l]
+                cur = [li]
             else:
-                cur.append(l)
+                cur.append(li)
         groups.append(cur)
-        texts = _split_text(it.get("text", ""), [sum(l[2] - l[0] for l in g) for g in groups])
-        for g, t in zip(groups, texts):
-            u = [min(l[0] for l in g), min(l[1] for l in g), max(l[2] for l in g), max(l[3] for l in g)]
+        texts = _split_text(it.get("text", ""), [sum(li[2] - li[0] for li in g) for g in groups])
+        for g, t in zip(groups, texts, strict=False):
+            u = [min(li[0] for li in g), min(li[1] for li in g), max(li[2] for li in g), max(li[3] for li in g)]
             out.append({"bbox": to1000(u), "label": it.get("label") or "Text", "text": t})
     return out
 
@@ -1057,6 +1274,7 @@ def raster_segments(page: Any, items: list[dict[str, Any]], mask: Any, R: Any) -
 # ---------------------------------------------------------------------------
 # Deterministic tables from ruling lines (O12)
 # ---------------------------------------------------------------------------
+
 
 def _cell_text(page: Any, bbox: tuple) -> str:
     import html as _h
@@ -1111,15 +1329,24 @@ def pdf_tables(page: Any) -> list[dict[str, Any]]:
             for cc in range(ncol):
                 v = occ[r][cc]
                 if isinstance(v, dict):
-                    attrs = (f' rowspan="{v["rs"]}"' if v["rs"] > 1 else "") + (f' colspan="{v["cs"]}"' if v["cs"] > 1 else "")
+                    attrs = (f' rowspan="{v["rs"]}"' if v["rs"] > 1 else "") + (
+                        f' colspan="{v["cs"]}"' if v["cs"] > 1 else ""
+                    )
                     cells_html.append(f"<{tag}{attrs}>{v['text']}</{tag}>")
                 elif v is None:
                     cells_html.append(f"<{tag}></{tag}>")
             rows_html.append("<tr>" + "".join(cells_html) + "</tr>")
         html = "<table><thead>" + rows_html[0] + "</thead><tbody>" + "".join(rows_html[1:]) + "</tbody></table>"
         x0, y0, x1, y1 = t.bbox
-        out.append({"bbox": [x0 / W * 1000, y0 / H * 1000, x1 / W * 1000, y1 / H * 1000], "html": html,
-                    "rows": nrow, "cols": ncol, "text": " ".join(str(v["text"]) for row in occ for v in row if isinstance(v, dict))})
+        out.append(
+            {
+                "bbox": [x0 / W * 1000, y0 / H * 1000, x1 / W * 1000, y1 / H * 1000],
+                "html": html,
+                "rows": nrow,
+                "cols": ncol,
+                "text": " ".join(str(v["text"]) for row in occ for v in row if isinstance(v, dict)),
+            }
+        )
     return out
 
 
@@ -1137,7 +1364,7 @@ def html_grid_consistent(html: str) -> bool:
     rows = _ROW_RE.findall(html)
     if not rows:
         return False
-    carry: dict[int, int] = {}   # column -> remaining rowspan
+    carry: dict[int, int] = {}  # column -> remaining rowspan
     widths = []
     for r in rows:
         col, w = 0, 0
@@ -1166,15 +1393,30 @@ def html_grid_consistent(html: str) -> bool:
 # Layout evidence from an open-source detector (docling-layout-heron, Apache-2.0)
 # ---------------------------------------------------------------------------
 
-DET_LABEL = {"caption": "Caption", "footnote": "Footnote", "formula": "Formula", "list_item": "List-item",
-             "page_footer": "Page-footer", "page_header": "Page-header", "picture": "Picture",
-             "section_header": "Section-header", "table": "Table", "text": "Text", "title": "Title",
-             "document_index": "Table", "code": "Text", "checkbox_selected": "Text", "checkbox_unselected": "Text",
-             "form": "Table", "key_value_region": "Text"}
+DET_LABEL = {
+    "caption": "Caption",
+    "footnote": "Footnote",
+    "formula": "Formula",
+    "list_item": "List-item",
+    "page_footer": "Page-footer",
+    "page_header": "Page-header",
+    "picture": "Picture",
+    "section_header": "Section-header",
+    "table": "Table",
+    "text": "Text",
+    "title": "Title",
+    "document_index": "Table",
+    "code": "Text",
+    "checkbox_selected": "Text",
+    "checkbox_unselected": "Text",
+    "form": "Table",
+    "key_value_region": "Text",
+}
 
 
-def detector_items(page: Any, dets: list[dict[str, Any]], vlm_items: list[dict[str, Any]], authority: str,
-                   min_score: float = 0.5) -> list[dict[str, Any]]:
+def detector_items(
+    page: Any, dets: list[dict[str, Any]], vlm_items: list[dict[str, Any]], authority: str, min_score: float = 0.5
+) -> list[dict[str, Any]]:
     """Grounding elements = detector boxes/classes. Text: PDF words owned by each box (trusted layer),
     else the proposer's blocks whose centre falls in the box. Order follows the proposer's reading order."""
     boxes = [d for d in dets if d["score"] >= min_score]
@@ -1189,13 +1431,22 @@ def detector_items(page: Any, dets: list[dict[str, Any]], vlm_items: list[dict[s
     else:
         for it in items:
             b = it["bbox"]
-            parts = [v.get("text", "") for v in vlm_items if isinstance(v.get("bbox"), list)
-                     and b[0] <= (v["bbox"][0] + v["bbox"][2]) / 2 <= b[2] and b[1] <= (v["bbox"][1] + v["bbox"][3]) / 2 <= b[3]]
+            parts = [
+                v.get("text", "")
+                for v in vlm_items
+                if isinstance(v.get("bbox"), list)
+                and b[0] <= (v["bbox"][0] + v["bbox"][2]) / 2 <= b[2]
+                and b[1] <= (v["bbox"][1] + v["bbox"][3]) / 2 <= b[3]
+            ]
             it["text"] = " ".join(parts)
-    for it in items:   # tables keep the proposer's HTML when they overlap one
+    for it in items:  # tables keep the proposer's HTML when they overlap one
         if it["label"] == "Table":
             for v in vlm_items:
-                if (v.get("label") or "").lower() == "table" and isinstance(v.get("bbox"), list) and _iou(v["bbox"], it["bbox"]) >= 0.3:
+                if (
+                    (v.get("label") or "").lower() == "table"
+                    and isinstance(v.get("bbox"), list)
+                    and _iou(v["bbox"], it["bbox"]) >= 0.3
+                ):
                     it["text"] = v.get("text", "")
                     break
 

@@ -21,7 +21,7 @@ from .config import PACKAGE_DIR
 
 TABLES_DIR = os.environ.get("BYTEVERITY_TABLES", str(PACKAGE_DIR / "rulebook" / "tables"))
 _LOCK = threading.Lock()
-_CACHE: dict[str, "DecisionTable"] = {}
+_CACHE: dict[str, DecisionTable] = {}
 
 
 class DecisionTable:
@@ -37,7 +37,7 @@ class DecisionTable:
         if t["n_cells"] != math.prod(len(v) for v in dom) or len(t["cells"]) != t["n_cells"]:
             raise RuntimeError(f"decision table {name}: incomplete")
         for combo in itertools.product(*dom):
-            key = json.dumps({i["name"]: v for i, v in zip(t["inputs"], combo)}, sort_keys=True)
+            key = json.dumps({i["name"]: v for i, v in zip(t["inputs"], combo, strict=False)}, sort_keys=True)
             if key not in t["cells"]:
                 raise RuntimeError(f"decision table {name}: cell {key} missing")
         self.name, self.field, self.oracle_digest = name, t["decision_field"], t["oracle_digest"]
@@ -47,8 +47,12 @@ class DecisionTable:
         cell = self.cells.get(json.dumps(facts, sort_keys=True))
         if cell is None:
             return {"status": "INVALID_INPUT", "errors": [f"facts outside the declared domain: {facts}"]}
-        return {"status": "DECIDED", "decision": {self.field: cell[0]}, "result_digest": cell[1],
-                "oracle_digest": self.oracle_digest}
+        return {
+            "status": "DECIDED",
+            "decision": {self.field: cell[0]},
+            "result_digest": cell[1],
+            "oracle_digest": self.oracle_digest,
+        }
 
 
 def table(name: str) -> DecisionTable:

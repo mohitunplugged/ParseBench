@@ -72,7 +72,7 @@ def calibrate_axes(page: Any) -> list[dict[str, Any]]:
             idxs.sort(key=lambda i: nums[i][pos])
             ps = [(nums[i][pos], nums[i]["v"]) for i in idxs]
             # tick labels are evenly spaced with evenly stepped values
-            steps = [b[1] - a[1] for a, b in zip(ps, ps[1:])]
+            steps = [b[1] - a[1] for a, b in zip(ps, ps[1:], strict=False)]
             if len({round(s, 6) for s in steps}) > max(1, len(steps) // 3):
                 continue
             f = _fit(ps)
@@ -81,10 +81,23 @@ def calibrate_axes(page: Any) -> list[dict[str, Any]]:
             a, b, _ = f
             lo = min(nums[i][pos] for i in idxs)
             hi = max(nums[i][pos] for i in idxs)
-            ext = [min(nums[i]["x0"] for i in idxs), min(nums[i]["y0"] for i in idxs),
-                   max(nums[i]["x1"] for i in idxs), max(nums[i]["y1"] for i in idxs)]
-            axes.append({"orient": orient, "a": a, "b": b, "lo": lo, "hi": hi, "ext": ext,
-                         "pct": any("%" in w[4] for w in words if _parse_num(w[4]) is not None)})
+            ext = [
+                min(nums[i]["x0"] for i in idxs),
+                min(nums[i]["y0"] for i in idxs),
+                max(nums[i]["x1"] for i in idxs),
+                max(nums[i]["y1"] for i in idxs),
+            ]
+            axes.append(
+                {
+                    "orient": orient,
+                    "a": a,
+                    "b": b,
+                    "lo": lo,
+                    "hi": hi,
+                    "ext": ext,
+                    "pct": any("%" in w[4] for w in words if _parse_num(w[4]) is not None),
+                }
+            )
             used.update(idxs)
     return axes
 
@@ -137,8 +150,7 @@ def _nice(v: float, like: str) -> str:
     return f"{v:.{dec}f}".rstrip("0").rstrip(".") if dec else f"{round(v)}"
 
 
-def refine_table_values(html: str, cands: list[float], printed: set[float],
-                        max_rel: float = 0.10) -> tuple[str, int]:
+def refine_table_values(html: str, cands: list[float], printed: set[float], max_rel: float = 0.10) -> tuple[str, int]:
     """Snap proposed numbers to geometry candidates when close and unambiguous.
 
     Values that exactly match a number printed on the page are never touched

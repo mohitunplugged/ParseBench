@@ -25,7 +25,9 @@ def table_shape(html: str) -> tuple[int, int]:
     return max(0, cols - 1), max(0, len(rows) - 1)
 
 
-def series_inks(page: Any, bbox_1000: list[float], dpi: int = 72, min_share: float = 0.006) -> list[tuple[int, int, int]]:
+def series_inks(
+    page: Any, bbox_1000: list[float], dpi: int = 72, min_share: float = 0.006
+) -> list[tuple[int, int, int]]:
     """Distinct non-background, non-text inks covering >= min_share of the chart region."""
     import numpy as np
 
@@ -40,11 +42,11 @@ def series_inks(page: Any, bbox_1000: list[float], dpi: int = 72, min_share: flo
     a = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)[:, :, :3].astype(int)
     px = a.reshape(-1, 3)
     mx, mn = px.max(1), px.min(1)
-    keep = (mn < 235) & (mx > 45)          # drop paper white and text black
+    keep = (mn < 235) & (mx > 45)  # drop paper white and text black
     px = px[keep]
     if len(px) == 0:
         return []
-    q = (px // 24) * 24 + 12               # quantize
+    q = (px // 24) * 24 + 12  # quantize
     keys, counts = np.unique(q, axis=0, return_counts=True)
     order = np.argsort(-counts)
     total = a.shape[0] * a.shape[1]
@@ -65,7 +67,7 @@ def residual_class(n_inks: int, n_series: int) -> str:
     """explained / extra_ink / missing_ink — does the table account for the drawn series?"""
     if n_series == 0:
         return "no_table"
-    if n_inks > n_series + 1:          # +1: one neutral ink (axes/gridlines/background band) is normal
+    if n_inks > n_series + 1:  # +1: one neutral ink (axes/gridlines/background band) is normal
         return "extra_ink"
     if n_inks < n_series and n_series > 2:
         return "missing_ink"
@@ -77,7 +79,12 @@ def text_residual(page: Any, bbox_1000: list[float], proposal_text: str) -> tupl
     from .floor import norm_tokens
 
     W, H = page.rect.width, page.rect.height
-    x0, y0, x1, y1 = (bbox_1000[0] / 1000 * W, bbox_1000[1] / 1000 * H, bbox_1000[2] / 1000 * W, bbox_1000[3] / 1000 * H)
+    x0, y0, x1, y1 = (
+        bbox_1000[0] / 1000 * W,
+        bbox_1000[1] / 1000 * H,
+        bbox_1000[2] / 1000 * W,
+        bbox_1000[3] / 1000 * H,
+    )
     have = set(norm_tokens(proposal_text))
     toks: list[str] = []
     for wx0, wy0, wx1, wy1, w, *_ in page.get_text("words"):
